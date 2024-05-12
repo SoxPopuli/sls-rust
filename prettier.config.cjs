@@ -1,12 +1,12 @@
 
 /** @type {import("prettier").Config} */
 const config = {
-  semi: true,
+  semi: false,
   tabWidth: 2,
   printWidth: 120,
   bracketSpacing: true,
   arrowParens: 'avoid',
-  singleQuote: false,
+  singleQuote: true,
 };
 
 module.exports = config;
