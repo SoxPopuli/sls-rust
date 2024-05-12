@@ -27,5 +27,8 @@
   ],
   "peerDependencies": {
     "serverless": "^3"
+  },
+  "devDependencies": {
+    "prettier": "^3.2.5"
   }
 }
