@@ -6,7 +6,13 @@ const { join } = require('node:path')
 const { stdin } = require('node:process')
 
 /**
+ * @typedef {import("serverless")} Serverless
+ * @typedef {import("serverless").Options} Options
+ * @typedef {import("serverless/classes/Plugin").Logging} Logging
+ * @typedef {import("serverless/classes/Service")} Service
  * @typedef {import("serverless").FunctionDefinitionHandler} FunctionDefinitionHandler
+ * @typedef {import("serverless").FunctionDefinitionImage} FunctionDefinitionImage
+ * @typedef {import("serverless").FunctionDefinition} FunctionDefinition
  */
 
 /**
@@ -82,12 +88,13 @@ class SlsRust {
   targetRuntime = 'aarch64-unknown-linux-musl'
 
   /**
-   * @param {any} serverless
-   * @param {any} options
+   * @param {Serverless} serverless
+   * @param {Options} options
+   * @param {Logging} Logging
    */
-  constructor(serverless, options) {
+  constructor(serverless, options, { log }) {
     this.serverless = serverless
-    this.log = serverless.cli.log
+    this.log = log
     this.options = options
 
     serverless.configSchemaHandler.defineTopLevelProperty('rust', {
@@ -121,24 +128,25 @@ class SlsRust {
   async buildPrepare() {
     const service = this.serverless.service
     if (service.provider.name !== 'aws') return
-    const rustFns = /** @type {string[]} */ (
-      this.serverless.service.getAllFunctions().filter((/** @type {string} */ fnName) => {
-        const fn = /** @type FunctionDefinitionHandler */ (service.getFunction(fnName))
-        return fn.tags?.rust === 'true'
-      })
-    )
+    const rustFns = this.serverless.service.getAllFunctions().filter(fnName => {
+      const fn = service.getFunction(fnName)
+      return fn.tags?.rust === 'true'
+    })
 
     if (rustFns.length === 0) {
       throw new SlsRustPluginNoRustFnsError()
     }
 
     const buildPromises = rustFns.map((fnName, index) => {
-      const fn = this.serverless.service.getFunction(fnName)
+      const fn = /** @type {FunctionDefinitionHandler} */ (this.serverless.service.getFunction(fnName))
+      if (fn.handler === undefined) {
+        return Promise.reject(`Function ${fnName} has no handler`)
+      }
       return this.build(fn, index)
     })
 
     await Promise.all(buildPromises)
-    this.log('finished building all rust functions!')
+    this.log.info('finished building all rust functions!')
   }
 
   /**
@@ -150,22 +158,22 @@ class SlsRust {
    */
   runCommand({ command, cwd, projectName, index }) {
     const [mainCommand, ...args] = command.split(' ')
-    const isVerbose = this.serverless.service.serverless.variables.options.verbose
+    const isVerbose = this.options.verbose ?? false
     return new Promise((resolve, reject) => {
       const build = spawn(mainCommand, args, { cwd })
-      build.on('error', (/** @type {any} */ error) => {
+      build.on('error', error => {
         reject(error.toString())
       })
-      build.on('close', (/** @type {any} */ code) => {
+      build.on('close', code => {
         resolve(code)
       })
 
       if (isVerbose) {
-        build.stdout.on('data', (/** @type {string} */ data) => {
+        build.stdout.on('data', data => {
           const color = index !== undefined ? colorByIndex(index) : 'default'
-          const prefix = withColor(`${projectName} | `, { fg: color })
+          const prefix = withColor(`${projectName} ┃ `, { fg: color })
           const output = withColor(data, { fg: 'default' })
-          console.log(`${prefix}${output}`)
+          this.log.info(`${prefix}${output}`)
         })
       }
     })
@@ -226,7 +234,8 @@ class SlsRust {
     }
   }
 
-  /** @param {import("serverless").FunctionDefinitionHandler} fn
+  /**
+   * @param {FunctionDefinitionHandler} fn
    * @param {number} index
    * */
   async build(fn, index) {
@@ -234,7 +243,7 @@ class SlsRust {
 
     const startMessage = `Building Rust ${fn.handler} func for ${this.targetRuntime}${this.useCross ? ' using cross' : '...'}`
 
-    this.log(startMessage)
+    this.log.info(startMessage)
     const path = join('.', projectPath)
     const targetPath = join(path, 'target', this.targetRuntime, 'release')
     await this.runBuildCommand({ path, projectName, index })
@@ -244,10 +253,10 @@ class SlsRust {
     fn.package = fn.package || {}
     fn.package.artifact = artifactPath
     fn.runtime = fn.runtime ?? 'provided.al2'
-    this.log(`Finished building ${projectName}!`)
+    this.log.info(`Finished building ${projectName}!`)
   }
 
-  /** @param {import("serverless").FunctionDefinitionHandler} fn */
+  /** @param {FunctionDefinitionHandler} fn */
   getProjectPathAndName(fn) {
     const [projectPath, projectName] = fn.handler.split('.')
     if (!projectPath || !projectName) {

@@ -29,6 +29,7 @@
     "serverless": "^3"
   },
   "devDependencies": {
+    "@types/serverless": "^3.12.22",
     "prettier": "^3.2.5"
   }
 }
